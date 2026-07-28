@@ -96,6 +96,9 @@ initDB();
 
 app.post('/api/login', async (req, res) => {
     try {
+        if (!process.env.DATABASE_URL) {
+            return res.status(500).json({ error: "DATABASE_URL environment variable is missing on server settings." });
+        }
         const { user_name } = req.body;
         if (!user_name) return res.status(400).json({ error: "Missing user_name" });
         
@@ -109,13 +112,16 @@ app.post('/api/login', async (req, res) => {
         
         res.status(200).json({ message: "Login successful", user: result.rows[0] });
     } catch (err) {
-        console.error(err);
-        res.status(500).json({ error: "Server error" });
+        console.error("Login error:", err);
+        res.status(500).json({ error: err.message || "Database query error" });
     }
 });
 
 app.post('/api/start-quiz', async (req, res) => {
     try {
+        if (!process.env.DATABASE_URL) {
+            return res.status(500).json({ error: "DATABASE_URL environment variable is missing on server settings." });
+        }
         let { user_id, user_name, test_name } = req.body;
         if (!user_name || !test_name) return res.status(400).json({ error: "Missing fields" });
         
@@ -146,8 +152,8 @@ app.post('/api/start-quiz', async (req, res) => {
         
         res.status(200).json({ message: "Quiz started", attempt: result.rows[0] });
     } catch (err) {
-        console.error(err);
-        res.status(500).json({ error: "Server error" });
+        console.error("Start quiz error:", err);
+        res.status(500).json({ error: err.message || "Database query error" });
     }
 });
 
@@ -211,6 +217,10 @@ app.use((req, res) => {
     res.sendFile(path.join(__dirname, '../frontend', 'index.html'));
 });
 
-app.listen(port, () => {
-    console.log(`Application server running at http://localhost:${port}`);
-});
+module.exports = app;
+
+if (require.main === module) {
+    app.listen(port, () => {
+        console.log(`Application server running at http://localhost:${port}`);
+    });
+}
