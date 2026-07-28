@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Python Quiz</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="container">
+        
+        <!-- Page 1: User Name Entry -->
+        <div id="page-login" class="card">
+            <h1>Python Quiz</h1>
+            <p class="subtitle">Master your Python skills with interactive tests.</p>
+            
+            <form id="login-form">
+                <div class="input-group">
+                    <label for="username">Enter Your Name</label>
+                    <input type="text" id="username" placeholder="e.g. Jane Doe" required autocomplete="off">
+                </div>
+                <button type="submit" class="btn">Start Quiz</button>
+            </form>
+        </div>
+
+        <!-- Page 2: Quiz Interface / Selection -->
+        <div id="page-selection" class="card hidden">
+            <h1>Python Mastery</h1>
+            <h2>Mock Test 1</h2>
+            <p class="subtitle">Welcome, <span id="display-name" style="color:var(--primary); font-weight:bold;"></span>! You are about to start the Python Mock Test 1. This test consists of 40 questions.</p>
+            
+            <button id="start-test-btn" class="btn">Start Mock Test 1</button>
+        </div>
+
+        <!-- Page 3: Mock Test 1 -->
+        <div id="page-quiz" class="card hidden quiz-layout-card">
+            <div class="quiz-layout-wrapper">
+                <!-- Sidebar -->
+                <aside class="sidebar quiz-sidebar">
+                    <h3 class="sidebar-title">Question Progress</h3>
+                    <div id="tile-bar" class="tile-grid compact-tiles">
+                        <!-- Tiles injected here -->
+                    </div>
+                </aside>
+
+                <!-- Main Quiz Content -->
+                <div class="main-quiz-content quiz-main">
+                    <!-- Fixed Header -->
+                    <div class="quiz-header fixed-header">
+                        <div class="header-left">
+                            <h2 class="quiz-title">Python Mastery — Mock Test 1</h2>
+                            <div class="question-counter">Question <span id="current-q">1</span> / <span id="total-q">40</span></div>
+                        </div>
+                        <div class="header-right">
+                            <div id="quiz-timer" class="timer-box">50:00</div>
+                            <button id="btn-mark-review" class="btn-mark-review">
+                                🔖 <span id="mark-text">Mark for Review</span>
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <!-- Scrollable Content -->
+                    <div class="scrollable-content">
+                        <div id="question-container">
+                            <!-- Question content will be injected here -->
+                        </div>
+                    </div>
+                    
+                    <!-- Fixed Footer -->
+                    <div class="quiz-nav fixed-footer">
+                        <button id="prev-btn" class="btn btn-secondary nav-btn">Previous</button>
+                        <button id="submit-btn" class="btn btn-review hidden nav-btn">Submit Quiz</button>
+                        <button id="next-btn" class="btn nav-btn">Next</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Page 4: Results -->
+        <div id="page-results" class="card hidden">
+            <h1>Quiz Results</h1>
+            <h2 id="result-user-name"></h2>
+            
+            <div class="result-stats">
+                <div class="stat-box">
+                    <div class="stat-value" id="res-score">0 / 40</div>
+                    <div class="stat-label">Score</div>
+                </div>
+                <div class="stat-box">
+                    <div class="stat-value" id="res-percentage">0%</div>
+                    <div class="stat-label">Percentage</div>
+                </div>
+                <div class="stat-box">
+                    <div class="stat-value" id="res-correct" style="color: var(--success);">0</div>
+                    <div class="stat-label">Correct Answers</div>
+                </div>
+                <div class="stat-box">
+                    <div class="stat-value" id="res-incorrect" style="color: var(--danger);">0</div>
+                    <div class="stat-label">Incorrect Answers</div>
+                </div>
+            </div>
+            
+            <div class="stat-box" style="margin-bottom: 2rem;">
+                <div class="stat-value" id="res-evaluation">Passed</div>
+                <div class="stat-label">Evaluation</div>
+            </div>
+            
+            <div class="result-stats" style="margin-bottom: 2rem;">
+                <div class="stat-box">
+                    <div class="stat-value" id="res-time-allowed">50:00</div>
+                    <div class="stat-label">Time Allowed</div>
+                </div>
+                <div class="stat-box">
+                    <div class="stat-value" id="res-time-taken">00:00</div>
+                    <div class="stat-label">Time Taken</div>
+                </div>
+                <div class="stat-box">
+                    <div class="stat-value" id="res-time-remaining">00:00</div>
+                    <div class="stat-label">Time Remaining</div>
+                </div>
+                <div class="stat-box">
+                    <div class="stat-value" id="res-submission-type">Manual</div>
+                    <div class="stat-label">Submission</div>
+                </div>
+                <div class="stat-box">
+                    <div class="stat-value" id="res-attempt-num">1</div>
+                    <div class="stat-label">Attempt Number</div>
+                </div>
+            </div>
+            
+            <button id="retake-btn" class="btn">Retake Quiz</button>
+            
+            <div class="answer-review-container">
+                <h2 style="margin-top: 3rem; border-top: 1px solid var(--border); padding-top: 2rem;">Answer Review</h2>
+                <div id="answer-review-list"></div>
+            </div>
+        </div>
+
+    </div>
+
+    <div id="toast">Message</div>
+
+    <script src="data/data.js"></script>
+    <script src="app.js"></script>
+</body>
+</html>
