@@ -19,11 +19,11 @@ const pool = new Pool({
     ssl: { rejectUnauthorized: false }
 });
 
-// Initialize Database Schema
+// Initialize Database Schema with Mock Test 1 table names
 async function initDB() {
     try {
         await pool.query(`
-            CREATE TABLE IF NOT EXISTS users (
+            CREATE TABLE IF NOT EXISTS mock_test_1_users (
                 id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
                 user_name TEXT UNIQUE NOT NULL,
                 session_id UUID,
@@ -34,7 +34,7 @@ async function initDB() {
         `);
 
         await pool.query(`
-            CREATE TABLE IF NOT EXISTS quiz_attempts (
+            CREATE TABLE IF NOT EXISTS mock_test_1_quiz_attempts (
                 id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
                 user_name TEXT NOT NULL,
                 test_name TEXT NOT NULL,
@@ -54,7 +54,7 @@ async function initDB() {
         `);
         
         const columnsToAdd = [
-            'user_id UUID REFERENCES users(id)',
+            'user_id UUID REFERENCES mock_test_1_users(id)',
             'status TEXT',
             'started_at TIMESTAMP WITH TIME ZONE',
             'completed_at TIMESTAMP WITH TIME ZONE',
@@ -64,29 +64,28 @@ async function initDB() {
         
         for (const col of columnsToAdd) {
             try {
-                await pool.query(`ALTER TABLE quiz_attempts ADD COLUMN IF NOT EXISTS ${col}`);
+                await pool.query(`ALTER TABLE mock_test_1_quiz_attempts ADD COLUMN IF NOT EXISTS ${col}`);
             } catch (e) {
                 // Ignore if exists
             }
         }
         
-        // Ensure nullable columns for incomplete attempts
         const columnsToDropNotNull = [
             'total_questions', 'correct_answers', 'incorrect_answers', 'score', 'percentage', 'evaluation'
         ];
         for (const col of columnsToDropNotNull) {
             try {
-                await pool.query(`ALTER TABLE quiz_attempts ALTER COLUMN ${col} DROP NOT NULL`);
+                await pool.query(`ALTER TABLE mock_test_1_quiz_attempts ALTER COLUMN ${col} DROP NOT NULL`);
             } catch (e) {
                 // Ignore
             }
         }
         
         try {
-            await pool.query(`ALTER TABLE quiz_attempts ALTER COLUMN score TYPE NUMERIC`);
+            await pool.query(`ALTER TABLE mock_test_1_quiz_attempts ALTER COLUMN score TYPE NUMERIC`);
         } catch (e) {}
         
-        console.log("Database schema verified.");
+        console.log("Database schema (mock_test_1_users & mock_test_1_quiz_attempts) verified.");
     } catch (err) {
         console.error("Database initialization error:", err);
     }
@@ -103,7 +102,7 @@ app.post('/api/login', async (req, res) => {
         if (!user_name) return res.status(400).json({ error: "Missing user_name" });
         
         const result = await pool.query(`
-            INSERT INTO users (user_name, session_id, login_time, current_status)
+            INSERT INTO mock_test_1_users (user_name, session_id, login_time, current_status)
             VALUES ($1, gen_random_uuid(), NOW(), 'Logged In')
             ON CONFLICT (user_name) DO UPDATE 
             SET session_id = gen_random_uuid(), login_time = NOW(), current_status = 'Logged In'
@@ -127,23 +126,23 @@ app.post('/api/start-quiz', async (req, res) => {
         
         if (!user_id) {
             const userRes = await pool.query(`
-                INSERT INTO users (user_name, current_status) VALUES ($1, 'Started')
+                INSERT INTO mock_test_1_users (user_name, current_status) VALUES ($1, 'Started')
                 ON CONFLICT (user_name) DO UPDATE SET current_status = 'Started'
                 RETURNING id
             `, [user_name]);
             user_id = userRes.rows[0].id;
         } else {
-            await pool.query(`UPDATE users SET current_status = 'Started' WHERE id = $1`, [user_id]);
+            await pool.query(`UPDATE mock_test_1_users SET current_status = 'Started' WHERE id = $1`, [user_id]);
         }
         
         const countResult = await pool.query(
-            'SELECT COUNT(*) FROM quiz_attempts WHERE user_name = $1 AND test_name = $2',
+            'SELECT COUNT(*) FROM mock_test_1_quiz_attempts WHERE user_name = $1 AND test_name = $2',
             [user_name, test_name]
         );
         const attempt_number = parseInt(countResult.rows[0].count, 10) + 1;
         
         const insertQuery = `
-            INSERT INTO quiz_attempts (
+            INSERT INTO mock_test_1_quiz_attempts (
                 user_id, user_name, test_name, attempt_number, status, started_at, time_allowed
             ) VALUES ($1, $2, $3, $4, 'Started', NOW(), '50:00')
             RETURNING *;
@@ -162,10 +161,10 @@ app.post('/api/finish-quiz', async (req, res) => {
         const data = req.body;
         if (!data.attempt_id || !data.user_id) return res.status(400).json({ error: "Missing attempt_id or user_id" });
         
-        await pool.query(`UPDATE users SET current_status = 'Completed Quiz' WHERE id = $1`, [data.user_id]);
+        await pool.query(`UPDATE mock_test_1_users SET current_status = 'Completed Quiz' WHERE id = $1`, [data.user_id]);
         
         const updateQuery = `
-            UPDATE quiz_attempts SET
+            UPDATE mock_test_1_quiz_attempts SET
                 status = 'Completed',
                 completed_at = NOW(),
                 updated_at = NOW(),
@@ -202,7 +201,7 @@ app.get('/api/user-history/:username', async (req, res) => {
     try {
         const { username } = req.params;
         const result = await pool.query(
-            'SELECT * FROM quiz_attempts WHERE user_name = $1 ORDER BY attempted_at DESC',
+            'SELECT * FROM mock_test_1_quiz_attempts WHERE user_name = $1 ORDER BY attempted_at DESC',
             [username]
         );
         res.status(200).json(result.rows);
