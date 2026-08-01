@@ -41,11 +41,86 @@ const toastEl = document.getElementById('toast');
 const markReviewBtn = document.getElementById('btn-mark-review');
 const markText = document.getElementById('mark-text');
 
+// Helper: Escape HTML
+function escapeHtml(text) {
+    if (!text) return '';
+    return String(text)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#039;");
+}
+
+// Helper: Check if an answer is genuinely given
+function isAnswerGiven(q, ua) {
+    if (ua === undefined || ua === null || ua === '') return false;
+    
+    if (q.type === 'MCQ') {
+        return typeof ua === 'number' || (typeof ua === 'string' && ua.trim() !== '');
+    }
+    
+    if (q.type === 'MCQ2') {
+        return Array.isArray(ua) && ua.length > 0;
+    }
+    
+    if (q.type === 'SHORT') {
+        return String(ua).trim().length > 0;
+    }
+    
+    if (q.type === 'TF') {
+        if (typeof ua !== 'object') return false;
+        return Object.values(ua).some(val => val !== undefined && val !== null && val !== '');
+    }
+    
+    if (q.type === 'DROPDOWN') {
+        if (typeof ua !== 'object') return false;
+        return Object.values(ua).some(val => val !== undefined && val !== null && val !== -1 && val !== "-1" && val !== "");
+    }
+    
+    if (q.type === 'DND' || q.type === 'MTF') {
+        if (typeof ua !== 'object') return false;
+        return Object.values(ua).some(val => val !== undefined && val !== null && val !== "");
+    }
+    
+    return false;
+}
+
+// Helper: Sync current input elements before switching questions or submitting
+function syncCurrentQuestionInput() {
+    if (currentQuestionIndex < 0 || !questions[currentQuestionIndex]) return;
+    const q = questions[currentQuestionIndex];
+    
+    if (q.type === 'SHORT') {
+        const input = document.querySelector('#question-container input[type="text"]');
+        if (input) {
+            const val = input.value.trim();
+            if (val !== '') {
+                userAnswers[currentQuestionIndex] = val;
+            } else {
+                delete userAnswers[currentQuestionIndex];
+            }
+        }
+    } else if (q.type === 'DROPDOWN') {
+        const selects = document.querySelectorAll('#question-container select.dropdown-blank');
+        selects.forEach(select => {
+            const blankIdx = parseInt(select.getAttribute('data-blank'), 10);
+            const val = select.value;
+            if (!userAnswers[currentQuestionIndex]) userAnswers[currentQuestionIndex] = {};
+            if (val !== "-1") {
+                userAnswers[currentQuestionIndex][blankIdx] = parseInt(val, 10);
+            } else {
+                delete userAnswers[currentQuestionIndex][blankIdx];
+            }
+        });
+    }
+}
+
 // Initialization
 async function init() {
     try {
         questions = typeof mockTest1Data !== 'undefined' ? mockTest1Data : [];
-        if(questions.length === 0) {
+        if (questions.length === 0) {
             console.error("No questions found.");
         }
         totalQSpan.innerText = questions.length;
@@ -61,7 +136,6 @@ async function init() {
     
     if (savedName) {
         userName = savedName;
-        // Do NOT prefill usernameInput.value here
     }
     if (savedUserId) userId = savedUserId;
     if (savedSessionId) sessionId = savedSessionId;
@@ -101,11 +175,9 @@ loginForm.addEventListener('submit', async (e) => {
     e.preventDefault();
     userName = usernameInput.value.trim();
     if (userName) {
-        // 1. Instantly navigate to Selection page
         displayName.innerText = userName;
         showPage('selection');
         
-        // 2. Perform API call in background
         try {
             const res = await fetch(`${API_BASE_URL}/login`, {
                 method: 'POST',
@@ -135,12 +207,10 @@ startTestBtn.addEventListener('click', async () => {
     markedForReview = {};
     initTileBar();
     
-    // 1. Immediately update UI and start test
     startTimer();
     renderQuestion();
     showPage('quiz');
     
-    // 2. Register attempt in background
     try {
         const res = await fetch(`${API_BASE_URL}/start-quiz`, {
             method: 'POST',
@@ -161,6 +231,7 @@ startTestBtn.addEventListener('click', async () => {
 });
 
 prevBtn.addEventListener('click', () => {
+    syncCurrentQuestionInput();
     if (currentQuestionIndex > 0) {
         currentQuestionIndex--;
         renderQuestion();
@@ -168,6 +239,7 @@ prevBtn.addEventListener('click', () => {
 });
 
 nextBtn.addEventListener('click', () => {
+    syncCurrentQuestionInput();
     if (currentQuestionIndex < questions.length - 1) {
         currentQuestionIndex++;
         renderQuestion();
@@ -175,6 +247,7 @@ nextBtn.addEventListener('click', () => {
 });
 
 submitBtn.addEventListener('click', () => {
+    syncCurrentQuestionInput();
     if (confirm("Are you sure you want to submit the quiz?")) {
         clearInterval(timerInterval);
         const endTime = parseInt(localStorage.getItem('pq_endTime'), 10) || Date.now();
@@ -210,14 +283,13 @@ function formatTime(ms) {
 function startTimer() {
     clearInterval(timerInterval);
     
-    // Check if there is an existing valid timer. If not, or if it's expired, start a new 50:00 timer.
     let endTime = parseInt(localStorage.getItem('pq_endTime'), 10);
     if (!endTime || endTime <= Date.now()) {
         endTime = Date.now() + TIME_ALLOWED_MS;
         localStorage.setItem('pq_endTime', endTime);
     }
     
-    updateTimerDisplay(); // Initial display
+    updateTimerDisplay();
     timerInterval = setInterval(updateTimerDisplay, 1000);
 }
 
@@ -230,6 +302,7 @@ function updateTimerDisplay() {
     
     if (remainingMs <= 0) {
         clearInterval(timerInterval);
+        syncCurrentQuestionInput();
         evaluateQuiz('Auto (Time Expired)', 0);
     }
 }
@@ -239,7 +312,6 @@ function renderQuestion() {
     const q = questions[currentQuestionIndex];
     currentQSpan.innerText = currentQuestionIndex + 1;
     
-    // Manage Buttons
     prevBtn.disabled = currentQuestionIndex === 0;
     
     if (currentQuestionIndex === questions.length - 1) {
@@ -250,7 +322,6 @@ function renderQuestion() {
         submitBtn.classList.add('hidden');
     }
     
-    // Manage Review Button State
     if (markedForReview[currentQuestionIndex]) {
         markReviewBtn.classList.add('marked');
         markText.innerText = 'Marked for Review';
@@ -261,24 +332,59 @@ function renderQuestion() {
     
     let html = `<div class="question-text">${q.q}</div>`;
     
+    // Code snippet & interactive elements rendering
     if (q.code) {
-        // Simple replace for DROPDOWN blanks [b1], [b2]
-        let codeHtml = q.code;
+        let codeHtml = escapeHtml(q.code);
+        
         if (q.type === 'DROPDOWN' && q.options) {
             q.options.forEach((opts, i) => {
-                let selectHtml = `<select data-blank="${i}" class="dropdown-blank" onchange="saveDropdownAnswer(${currentQuestionIndex}, ${i}, this.value)">`;
+                let selectHtml = `<select data-blank="${i}" class="dropdown-blank" onchange="saveDropdownAnswer(${currentQuestionIndex}, ${i}, this.value)" oninput="saveDropdownAnswer(${currentQuestionIndex}, ${i}, this.value)">`;
                 selectHtml += `<option value="-1">-- Select --</option>`;
                 opts.forEach((opt, optIdx) => {
                     let isSelected = (userAnswers[currentQuestionIndex] && userAnswers[currentQuestionIndex][i] == optIdx) ? 'selected' : '';
-                    selectHtml += `<option value="${optIdx}" ${isSelected}>${opt}</option>`;
+                    selectHtml += `<option value="${optIdx}" ${isSelected}>${escapeHtml(opt)}</option>`;
                 });
                 selectHtml += `</select>`;
                 codeHtml = codeHtml.replace(`[b${i+1}]`, selectHtml);
             });
+            html += `<pre><code>${codeHtml}</code></pre>`;
+            
+        } else if (q.type === 'DND' && q.code.includes('[target')) {
+            // DND with code targets (Q7, Q14)
+            const targetMatches = q.code.match(/\[target\d+\]/g) || [];
+            targetMatches.forEach((targetTag, i) => {
+                const currentAns = (userAnswers[currentQuestionIndex] && userAnswers[currentQuestionIndex][i]) ? userAnswers[currentQuestionIndex][i] : '';
+                const filledClass = currentAns ? 'filled' : '';
+                
+                const dropzoneHtml = `<span class="code-dropzone ${filledClass}" ondragover="dragOver(event)" ondrop="dropCodeTarget(event, ${currentQuestionIndex}, ${i})" onclick="clickTargetSlot(${currentQuestionIndex}, ${i})">${currentAns ? `${escapeHtml(currentAns)} <span class="code-dropzone-remove" onclick="clearCodeTarget(event, ${currentQuestionIndex}, ${i})">✖</span>` : `Target ${i + 1}`}</span>`;
+                codeHtml = codeHtml.replace(targetTag, dropzoneHtml);
+            });
+            
+            html += `<pre><code>${codeHtml}</code></pre>`;
+            
+            // Available choice pills below code
+            html += `<div style="margin-top: 1rem;">`;
+            html += `<div style="font-size: 0.9rem; color: var(--text-muted); margin-bottom: 0.5rem; font-weight: 600;">Drag or click a choice to place in next open target:</div>`;
+            html += `<div style="display: flex; flex-wrap: wrap; gap: 0.5rem;">`;
+            
+            q.options.forEach((choice, idx) => {
+                let isUsed = false;
+                if (userAnswers[currentQuestionIndex]) {
+                    isUsed = Object.values(userAnswers[currentQuestionIndex]).includes(choice);
+                }
+                if (!isUsed) {
+                    const safeChoiceJS = choice.replace(/'/g, "\\'").replace(/"/g, "&quot;").replace(/\n/g, "\\n").replace(/\r/g, "\\r");
+                    html += `<div class="draggable option-btn" style="padding: 0.5rem 1rem; border-color: var(--primary); margin: 0; white-space: pre-wrap;" draggable="true" ondragstart="dragStart(event, '${safeChoiceJS}')" onclick="placeChoiceInFirstAvailableTarget(${currentQuestionIndex}, '${safeChoiceJS}')">${escapeHtml(choice)}</div>`;
+                }
+            });
+            html += `</div></div>`;
+            
+        } else {
+            html += `<pre><code>${codeHtml}</code></pre>`;
         }
-        html += `<pre><code>${codeHtml}</code></pre>`;
     }
     
+    // Question option controls
     if (q.type === 'TF') {
         html += `<div class="options-grid">`;
         if (q.options) {
@@ -301,7 +407,7 @@ function renderQuestion() {
     } else if (q.type === 'MCQ' || q.type === 'MCQ2') {
         html += `<div class="options-grid">`;
         if (q.options) {
-            let maxSel = 2; // Default to 2
+            let maxSel = 2;
             if (Array.isArray(q.a)) {
                 maxSel = q.a.length;
             } else if (q.q.toLowerCase().includes('choose 3') || q.q.toLowerCase().includes('select 3') || q.q.toLowerCase().includes('choose three')) {
@@ -321,25 +427,23 @@ function renderQuestion() {
                 
                 const selectedClass = isSelected ? 'selected' : '';
                 const disabledClass = (q.type === 'MCQ2' && maxReached && !isSelected) ? 'disabled' : '';
+                const optLetter = String.fromCharCode(65 + idx);
                 
-                html += `<div class="option-btn ${selectedClass} ${disabledClass}" onclick="${disabledClass ? '' : `selectOption(${currentQuestionIndex}, ${idx}, '${q.type}')`}">${opt}</div>`;
+                html += `<div class="option-btn ${selectedClass} ${disabledClass}" onclick="${disabledClass ? '' : `selectOption(${currentQuestionIndex}, ${idx}, '${q.type}')`}"><strong style="color: var(--primary); margin-right: 8px;">Option ${optLetter}:</strong> ${opt}</div>`;
             });
         }
         html += `</div>`;
     } else if (q.type === 'SHORT') {
-        const val = userAnswers[currentQuestionIndex] || '';
+        const val = userAnswers[currentQuestionIndex] !== undefined ? userAnswers[currentQuestionIndex] : '';
         html += `<div class="input-group">
-            <input type="text" value="${val}" onchange="saveShortAnswer(${currentQuestionIndex}, this.value)" placeholder="Type your answer here">
+            <input type="text" value="${escapeHtml(val)}" oninput="saveShortAnswer(${currentQuestionIndex}, this.value)" onchange="saveShortAnswer(${currentQuestionIndex}, this.value)" placeholder="Type your answer here">
         </div>`;
-    } else if (q.type === 'MTF' || q.type === 'DND') {
+    } else if (q.type === 'MTF' || (q.type === 'DND' && !q.code)) {
         let itemsToMatch = q.options || q.labels || [];
         let choices = q.labels || q.options || [];
-        // If it's MTF and has 'a' as dict mapping
         if (typeof q.a === 'object' && !Array.isArray(q.a)) {
             itemsToMatch = Object.keys(q.a);
-            // collect all possible answers
-            choices = [...new Set(Object.values(q.a))];
-            if (q.labels) choices = q.labels; // if provided
+            choices = q.labels || [...new Set(Object.values(q.a))];
         }
         
         html += `<div style="display: flex; gap: 2rem;">`;
@@ -347,7 +451,6 @@ function renderQuestion() {
         // Left Column (Options)
         html += `<div style="flex: 1; display: flex; flex-direction: column; gap: 0.5rem;" id="dnd-source">`;
         choices.forEach((choice, idx) => {
-            // Only show choices not already matched
             let isUsed = false;
             if (userAnswers[currentQuestionIndex]) {
                 isUsed = Object.values(userAnswers[currentQuestionIndex]).includes(choice);
@@ -363,11 +466,10 @@ function renderQuestion() {
         html += `<div style="flex: 2; display: flex; flex-direction: column; gap: 0.5rem;">`;
         itemsToMatch.forEach((item, i) => {
             const currentAns = (userAnswers[currentQuestionIndex] && userAnswers[currentQuestionIndex][item]) ? userAnswers[currentQuestionIndex][item] : '';
-            
             const safeItemJS = item.replace(/'/g, "\\'").replace(/"/g, "&quot;").replace(/\n/g, "\\n").replace(/\r/g, "\\r");
             
             let dropContent = currentAns ? 
-                `<div style="color: var(--primary); font-weight: bold;">${currentAns} <span style="cursor: pointer; color: var(--danger); margin-left: 10px;" onclick="clearMatchingAnswer(${currentQuestionIndex}, '${safeItemJS}')">✖</span></div>` 
+                `<div style="color: var(--primary); font-weight: bold;">${escapeHtml(currentAns)} <span style="cursor: pointer; color: var(--danger); margin-left: 10px;" onclick="clearMatchingAnswer(${currentQuestionIndex}, '${safeItemJS}')">✖</span></div>` 
                 : `<div style="color: var(--text-muted); text-align: center; font-style: italic;">Drop here</div>`;
                 
             html += `<div style="display: flex; align-items: center; gap: 1rem;">`;
@@ -389,22 +491,22 @@ function renderQuestion() {
     }
 }
 
-// Interaction Handlers (need to be attached to window for inline HTML handlers)
+// Interaction Handlers (Window Scope)
 window.selectTFOption = function(qIndex, stmtIndex, value) {
     if (!userAnswers[qIndex] || typeof userAnswers[qIndex] !== 'object' || Array.isArray(userAnswers[qIndex])) {
         userAnswers[qIndex] = {};
     }
     userAnswers[qIndex][stmtIndex] = value;
     renderQuestion();
-}
+};
 
 window.selectOption = function(qIndex, optIndex, type) {
     if (type === 'MCQ2') {
-        if (!userAnswers[qIndex]) userAnswers[qIndex] = [];
+        if (!userAnswers[qIndex] || !Array.isArray(userAnswers[qIndex])) userAnswers[qIndex] = [];
         const pos = userAnswers[qIndex].indexOf(optIndex);
         if (pos === -1) {
             const q = questions[qIndex];
-            let maxSel = 2; // Default
+            let maxSel = 2;
             if (Array.isArray(q.a)) {
                 maxSel = q.a.length;
             } else if (q.q.toLowerCase().includes('choose 3') || q.q.toLowerCase().includes('select 3') || q.q.toLowerCase().includes('choose three')) {
@@ -421,37 +523,41 @@ window.selectOption = function(qIndex, optIndex, type) {
         userAnswers[qIndex] = optIndex;
     }
     renderQuestion();
-}
+};
 
 window.saveDropdownAnswer = function(qIndex, blankIndex, value) {
-    if (!userAnswers[qIndex]) userAnswers[qIndex] = {};
+    if (!userAnswers[qIndex] || typeof userAnswers[qIndex] !== 'object') userAnswers[qIndex] = {};
     if (value === "-1") {
         delete userAnswers[qIndex][blankIndex];
     } else {
-        userAnswers[qIndex][blankIndex] = value;
+        userAnswers[qIndex][blankIndex] = parseInt(value, 10);
     }
     updateTile(qIndex);
-}
+};
 
 window.saveShortAnswer = function(qIndex, value) {
-    userAnswers[qIndex] = value.trim();
-    if (userAnswers[qIndex] === '') delete userAnswers[qIndex];
+    const trimmed = value.trim();
+    if (trimmed === '') {
+        delete userAnswers[qIndex];
+    } else {
+        userAnswers[qIndex] = value;
+    }
     updateTile(qIndex);
-}
+};
 
 window.saveMatchingAnswer = function(qIndex, item, value) {
-    if (!userAnswers[qIndex]) userAnswers[qIndex] = {};
+    if (!userAnswers[qIndex] || typeof userAnswers[qIndex] !== 'object') userAnswers[qIndex] = {};
     userAnswers[qIndex][item] = value;
     renderQuestion();
-}
+};
 
 window.dragStart = function(e, choice) {
     e.dataTransfer.setData('text/plain', choice);
-}
+};
 
 window.dragOver = function(e) {
-    e.preventDefault(); // allow drop
-}
+    e.preventDefault();
+};
 
 window.drop = function(e, qIndex, item) {
     e.preventDefault();
@@ -459,14 +565,51 @@ window.drop = function(e, qIndex, item) {
     if (choice) {
         saveMatchingAnswer(qIndex, item, choice);
     }
-}
+};
 
 window.clearMatchingAnswer = function(qIndex, item) {
     if (userAnswers[qIndex]) {
         delete userAnswers[qIndex][item];
     }
     renderQuestion();
-}
+};
+
+// DND Code Target Handlers
+window.dropCodeTarget = function(e, qIndex, targetIdx) {
+    e.preventDefault();
+    const choice = e.dataTransfer.getData('text/plain');
+    if (choice) {
+        if (!userAnswers[qIndex] || typeof userAnswers[qIndex] !== 'object') userAnswers[qIndex] = {};
+        userAnswers[qIndex][targetIdx] = choice;
+        renderQuestion();
+    }
+};
+
+window.clickTargetSlot = function(qIndex, targetIdx) {
+    // If target is clicked without action, focus
+};
+
+window.clearCodeTarget = function(e, qIndex, targetIdx) {
+    e.stopPropagation();
+    if (userAnswers[qIndex] && typeof userAnswers[qIndex] === 'object') {
+        delete userAnswers[qIndex][targetIdx];
+    }
+    renderQuestion();
+};
+
+window.placeChoiceInFirstAvailableTarget = function(qIndex, choice) {
+    const q = questions[qIndex];
+    const targetMatches = (q.code.match(/\[target\d+\]/g) || []);
+    if (!userAnswers[qIndex] || typeof userAnswers[qIndex] !== 'object') userAnswers[qIndex] = {};
+    
+    for (let i = 0; i < targetMatches.length; i++) {
+        if (!userAnswers[qIndex][i]) {
+            userAnswers[qIndex][i] = choice;
+            renderQuestion();
+            break;
+        }
+    }
+};
 
 // Tile Bar Logic
 function initTileBar() {
@@ -478,6 +621,7 @@ function initTileBar() {
         tile.innerText = idx + 1;
         tile.id = `tile-${idx}`;
         tile.onclick = () => {
+            syncCurrentQuestionInput();
             currentQuestionIndex = idx;
             renderQuestion();
         };
@@ -486,20 +630,7 @@ function initTileBar() {
 }
 
 function checkIfAnswered(idx) {
-    const q = questions[idx];
-    const ua = userAnswers[idx];
-    if (ua === undefined || ua === null || ua === '') return false;
-    
-    if (q.type === 'MCQ' || q.type === 'SHORT') {
-        return true; 
-    }
-    if (q.type === 'MCQ2') {
-        return Array.isArray(ua) && ua.length > 0;
-    }
-    if (q.type === 'TF' || q.type === 'DROPDOWN' || q.type === 'MTF' || q.type === 'DND') {
-        return typeof ua === 'object' && Object.keys(ua).length > 0;
-    }
-    return false;
+    return isAnswerGiven(questions[idx], userAnswers[idx]);
 }
 
 function updateAllTiles() {
@@ -521,234 +652,250 @@ function updateTile(idx) {
     if (isCurrent) tile.classList.add('current');
 }
 
-
-// Evaluation
+// Evaluation & Answer Review Generation
 async function evaluateQuiz(submissionType = 'Manual', remainingMs = 0) {
-    localStorage.removeItem('pq_endTime'); // Clear timer state
+    localStorage.removeItem('pq_endTime');
     
     let score = 0;
     let reviewHtml = '';
     
     questions.forEach((q, idx) => {
         const ua = userAnswers[idx];
+        const answered = isAnswerGiven(q, ua);
         const correct = q.a;
         
         let qStatus = 'Not Answered';
         let qPts = 0;
-        let uaDisplay = 'Not Answered';
-        let caDisplay = '';
+        let uaFormatted = 'Not Answered';
+        let caFormatted = '';
         
         if (q.type === 'MCQ') {
-            if (ua !== undefined) {
-                if (ua === correct || (Array.isArray(correct) && correct[0] === ua)) {
+            const cIdx = Array.isArray(correct) ? correct[0] : correct;
+            caFormatted = (q.options && q.options[cIdx] !== undefined)
+                ? `Option ${String.fromCharCode(65 + cIdx)} — ${escapeHtml(q.options[cIdx])}`
+                : String(cIdx);
+                
+            if (answered) {
+                const userChoiceIdx = Number(ua);
+                if (userChoiceIdx === cIdx) {
                     qPts = 1;
                     qStatus = 'Correct';
                 } else {
                     qStatus = 'Incorrect';
                 }
-                uaDisplay = (q.options && q.options[ua] !== undefined) ? q.options[ua] : String(ua);
-            }
-            caDisplay = Array.isArray(correct) ? (q.options ? q.options[correct[0]] : String(correct[0])) : (q.options ? q.options[correct] : String(correct));
-
-        } else if (q.type === 'TF') {
-            if (Array.isArray(correct)) {
-                let pts = 0;
-                let reviewLines = [];
-                correct.forEach((ansText, i) => {
-                    const stmtText = q.options ? q.options[i] : `Statement ${i+1}`;
-                    const selAns = (ua && ua[i] !== undefined) ? ua[i] : null;
-                    
-                    const normSel = String(selAns).toUpperCase();
-                    const normAns = String(ansText).toUpperCase();
-                    
-                    if (selAns !== null) {
-                        if (normSel === normAns) {
-                            pts += (1/correct.length);
-                            reviewLines.push(`${stmtText}\n\nYour Answer:\n${selAns}\n\nCorrect Answer:\n${ansText}\n\nStatus:\n✅ Correct`);
-                        } else {
-                            reviewLines.push(`${stmtText}\n\nYour Answer:\n${selAns}\n\nCorrect Answer:\n${ansText}\n\nStatus:\n❌ Incorrect`);
-                        }
-                    } else {
-                        reviewLines.push(`${stmtText}\n\nYour Answer:\nNot Answered\n\nCorrect Answer:\n${ansText}\n\nStatus:\nNot Answered`);
-                    }
-                });
-                
-                qPts = pts;
-                if (pts === 1) qStatus = 'Correct';
-                else if (pts > 0) qStatus = 'Incorrect'; 
-                else qStatus = 'Incorrect';
-                
-                uaDisplay = reviewLines.join('\n\n------------------------------------------------\n\n');
-            } else {
-                // Fallback for single TF
-                 const normSel = String(ua).toUpperCase();
-                 const normAns = String(correct).toUpperCase();
-                 if (ua !== undefined && normSel === normAns) {
-                     qPts = 1;
-                     qStatus = 'Correct';
-                 } else if (ua !== undefined) {
-                     qStatus = 'Incorrect';
-                 }
-                 uaDisplay = String(ua);
-                 caDisplay = String(correct);
+                uaFormatted = (q.options && q.options[userChoiceIdx] !== undefined)
+                    ? `Option ${String.fromCharCode(65 + userChoiceIdx)} — ${escapeHtml(q.options[userChoiceIdx])}`
+                    : String(ua);
             }
 
         } else if (q.type === 'MCQ2') {
-            if (ua && Array.isArray(correct)) {
-                let pts = 0;
-                ua.forEach(ans => { if (correct.includes(ans)) pts += (1/correct.length); });
-                qPts = pts;
-                if (pts === 1) qStatus = 'Correct';
-                else if (pts > 0) qStatus = 'Incorrect'; // Partial credit not fully correct
-                else qStatus = 'Incorrect';
+            const cArr = Array.isArray(correct) ? correct : [correct];
+            caFormatted = `<ul class="review-list">${cArr.map(i => `<li class="review-list-item">Option ${String.fromCharCode(65 + i)} — ${escapeHtml(q.options[i])}</li>`).join('')}</ul>`;
+            
+            if (answered && Array.isArray(ua)) {
+                let matchCount = 0;
+                ua.forEach(ans => { if (cArr.includes(ans)) matchCount++; });
                 
-                uaDisplay = ua.map(a => q.options[a]).join(', ');
-            } else if (ua !== undefined && ua.length > 0) {
-                 qStatus = 'Incorrect';
-                 uaDisplay = ua.map(a => q.options[a]).join(', ');
+                if (matchCount === cArr.length && ua.length === cArr.length) {
+                    qPts = 1;
+                    qStatus = 'Correct';
+                } else {
+                    qPts = matchCount > 0 ? (matchCount / cArr.length) : 0;
+                    qStatus = 'Incorrect';
+                }
+                
+                uaFormatted = `<ul class="review-list">${ua.map(i => `<li class="review-list-item">Option ${String.fromCharCode(65 + i)} — ${escapeHtml(q.options[i])}</li>`).join('')}</ul>`;
             }
-            caDisplay = Array.isArray(correct) ? correct.map(a => q.options[a]).join(', ') : String(correct);
 
-        } else if (q.type === 'DROPDOWN') {
-            if (ua && Array.isArray(correct)) {
-                let pts = 0;
-                let uaArr = [];
-                correct.forEach((ansText, i) => {
-                    const selIdx = ua[i];
-                    if (selIdx !== undefined && selIdx !== "-1") {
-                        const selText = q.options[i][selIdx];
-                        uaArr.push(`Blank ${i+1}: ${selText}`);
-                        if (selText === ansText) pts += (1/correct.length);
+        } else if (q.type === 'TF') {
+            const cArr = Array.isArray(correct) ? correct : [correct];
+            let pts = 0;
+            
+            caFormatted = `<ul class="review-list">${(q.options || cArr).map((stmt, i) => {
+                const ansStr = String(cArr[i]).toUpperCase();
+                return `<li class="review-list-item"><strong>Statement ${i+1}:</strong> ${escapeHtml(stmt)}<br>&nbsp;&nbsp;&nbsp;&nbsp;<em>Correct Answer:</em> ${escapeHtml(ansStr)}</li>`;
+            }).join('')}</ul>`;
+            
+            if (answered) {
+                let userLines = [];
+                (q.options || cArr).forEach((stmt, i) => {
+                    const selVal = (ua && ua[i] !== undefined && ua[i] !== null) ? String(ua[i]).toUpperCase() : null;
+                    const ansVal = String(cArr[i]).toUpperCase();
+                    
+                    if (selVal !== null) {
+                        if (selVal === ansVal) {
+                            pts += (1 / cArr.length);
+                        }
+                        userLines.push(`<li class="review-list-item"><strong>Statement ${i+1}:</strong> ${escapeHtml(stmt)}<br>&nbsp;&nbsp;&nbsp;&nbsp;<em>Your Choice:</em> ${escapeHtml(selVal)}</li>`);
                     } else {
-                        uaArr.push(`Blank ${i+1}: Not Answered`);
+                        userLines.push(`<li class="review-list-item"><strong>Statement ${i+1}:</strong> ${escapeHtml(stmt)}<br>&nbsp;&nbsp;&nbsp;&nbsp;<em>Your Choice:</em> Not Answered</li>`);
                     }
                 });
+                
                 qPts = pts;
                 if (pts === 1) qStatus = 'Correct';
-                else if (pts > 0) qStatus = 'Incorrect'; 
                 else qStatus = 'Incorrect';
                 
-                if (Object.keys(ua).length > 0) uaDisplay = uaArr.join('\n');
+                uaFormatted = `<ul class="review-list">${userLines.join('')}</ul>`;
             }
-            caDisplay = Array.isArray(correct) ? correct.map((c, i) => `Blank ${i+1}: ${c}`).join('\n') : String(correct);
+
+        } else if (q.type === 'DROPDOWN') {
+            const cArr = Array.isArray(correct) ? correct : [correct];
+            
+            caFormatted = `<ul class="review-list">${cArr.map((c, i) => `<li class="review-list-item"><strong>Dropdown ${i+1} ([b${i+1}]):</strong> ${escapeHtml(c)}</li>`).join('')}</ul>`;
+            
+            if (answered) {
+                let pts = 0;
+                let userLines = [];
+                
+                cArr.forEach((ansText, i) => {
+                    const selIdx = ua ? ua[i] : undefined;
+                    if (selIdx !== undefined && selIdx !== null && selIdx !== -1 && selIdx !== "-1" && q.options[i] && q.options[i][selIdx] !== undefined) {
+                        const selText = q.options[i][selIdx];
+                        userLines.push(`<li class="review-list-item"><strong>Dropdown ${i+1} ([b${i+1}]):</strong> ${escapeHtml(selText)}</li>`);
+                        if (selText === ansText) pts += (1 / cArr.length);
+                    } else {
+                        userLines.push(`<li class="review-list-item"><strong>Dropdown ${i+1} ([b${i+1}]):</strong> Not Answered</li>`);
+                    }
+                });
+                
+                qPts = pts;
+                if (pts === 1) qStatus = 'Correct';
+                else qStatus = 'Incorrect';
+                
+                uaFormatted = `<ul class="review-list">${userLines.join('')}</ul>`;
+            }
+
+        } else if (q.type === 'DND') {
+            const cArr = Array.isArray(correct) ? correct : [correct];
+            
+            caFormatted = `<ul class="review-list">${cArr.map((c, i) => `<li class="review-list-item"><strong>Target ${i+1} ([target${i+1}]):</strong> ${escapeHtml(c)}</li>`).join('')}</ul>`;
+            
+            if (answered) {
+                let pts = 0;
+                let userLines = [];
+                
+                cArr.forEach((ansText, i) => {
+                    const userVal = ua ? ua[i] : undefined;
+                    if (userVal) {
+                        userLines.push(`<li class="review-list-item"><strong>Target ${i+1} ([target${i+1}]):</strong> ${escapeHtml(userVal)}</li>`);
+                        if (userVal === ansText) pts += (1 / cArr.length);
+                    } else {
+                        userLines.push(`<li class="review-list-item"><strong>Target ${i+1} ([target${i+1}]):</strong> Not Answered</li>`);
+                    }
+                });
+                
+                qPts = pts;
+                if (pts === 1) qStatus = 'Correct';
+                else qStatus = 'Incorrect';
+                
+                uaFormatted = `<ul class="review-list">${userLines.join('')}</ul>`;
+            }
+
+        } else if (q.type === 'MTF') {
+            const cObj = (typeof correct === 'object' && !Array.isArray(correct)) ? correct : {};
+            const keys = Object.keys(cObj);
+            
+            caFormatted = `<ul class="review-list">${keys.map(k => `<li class="review-list-item"><strong>${escapeHtml(k)}</strong> &rarr; ${escapeHtml(cObj[k])}</li>`).join('')}</ul>`;
+            
+            if (answered) {
+                let pts = 0;
+                let userLines = [];
+                
+                keys.forEach(k => {
+                    const userVal = ua ? ua[k] : undefined;
+                    if (userVal) {
+                        userLines.push(`<li class="review-list-item"><strong>${escapeHtml(k)}</strong> &rarr; ${escapeHtml(userVal)}</li>`);
+                        if (userVal === cObj[k]) pts += (1 / keys.length);
+                    } else {
+                        userLines.push(`<li class="review-list-item"><strong>${escapeHtml(k)}</strong> &rarr; Not Answered</li>`);
+                    }
+                });
+                
+                qPts = pts;
+                if (pts === 1) qStatus = 'Correct';
+                else qStatus = 'Incorrect';
+                
+                uaFormatted = `<ul class="review-list">${userLines.join('')}</ul>`;
+            }
 
         } else if (q.type === 'SHORT') {
-            if (ua) {
-                if (ua.toLowerCase() == String(correct).toLowerCase()) {
+            caFormatted = `<code>${escapeHtml(String(correct))}</code>`;
+            
+            if (answered) {
+                const normUser = String(ua).trim().toLowerCase();
+                const normAns = String(correct).trim().toLowerCase();
+                
+                if (normUser === normAns) {
                     qPts = 1;
                     qStatus = 'Correct';
                 } else {
                     qStatus = 'Incorrect';
                 }
-                uaDisplay = ua;
-            }
-            caDisplay = String(correct);
-
-        } else if (q.type === 'MTF' || q.type === 'DND') {
-            if (ua && typeof correct === 'object') {
-                let pts = 0;
-                let uaArr = [];
-                let caArr = [];
-                const keys = Object.keys(correct);
-                keys.forEach(k => {
-                    const userVal = ua[k];
-                    if (userVal) {
-                        uaArr.push(`${k} → ${userVal}`);
-                        if (userVal === correct[k]) pts += (1/keys.length);
-                    } else {
-                        uaArr.push(`${k} → Not Answered`);
-                    }
-                    caArr.push(`${k} → ${correct[k]}`);
-                });
-                qPts = pts;
-                if (pts === 1) qStatus = 'Correct';
-                else if (pts > 0) qStatus = 'Incorrect';
-                else qStatus = 'Incorrect';
-                
-                if (Object.keys(ua).length > 0) uaDisplay = uaArr.join('\n');
-                caDisplay = caArr.join('\n');
-            } else if (ua && Array.isArray(correct)) {
-                 caDisplay = correct.join('\n');
-                 // For DND array format... fallback
-                 uaDisplay = JSON.stringify(ua);
-                 qStatus = 'Incorrect';
-            } else {
-                 caDisplay = typeof correct === 'object' && !Array.isArray(correct) ? Object.keys(correct).map(k => `${k} → ${correct[k]}`).join('\n') : String(correct);
+                uaFormatted = `<code>${escapeHtml(String(ua))}</code>`;
             }
         }
         
-        // Ensure qStatus is accurate for totally empty answers
-        if (q.type !== 'TF' && (ua === undefined || ua === null || ua === '') && (typeof ua !== 'object' || Object.keys(ua || {}).length === 0) && (!Array.isArray(ua) || ua.length === 0)) {
+        if (!answered) {
             qStatus = 'Not Answered';
-            uaDisplay = 'Not Answered';
+            uaFormatted = 'Not Answered';
+            qPts = 0;
         }
         
         score += qPts;
         
-        // Build HTML for Review
-        let statusClass = qStatus === 'Correct' ? 'correct' : (qStatus === 'Incorrect' ? 'incorrect' : 'unanswered');
+        const statusClass = qStatus === 'Correct' ? 'correct' : (qStatus === 'Incorrect' ? 'incorrect' : 'unanswered');
         
-        if (q.type === 'TF' && Array.isArray(correct)) {
-            // TF Multiple Statements format
-            reviewHtml += `
-                <div class="review-item">
-                    <div class="review-question-num">Question ${idx + 1}</div>
-                    <div class="review-question-text">${q.q}</div>
-                    <div class="review-answers">
-                        <div class="review-answer-value">${uaDisplay}</div>
+        reviewHtml += `
+            <div class="review-item">
+                <div class="review-header">
+                    <span class="review-question-num">Question ${idx + 1}</span>
+                    <span class="review-status ${statusClass}">${qStatus}</span>
+                </div>
+                
+                <div class="review-question-text">${q.q}</div>
+                
+                ${q.code ? `<div class="review-code-block"><pre><code>${escapeHtml(q.code)}</code></pre></div>` : ''}
+                
+                ${q.image ? `<div style="margin-bottom: 1rem;"><img src="${q.image}" style="max-width: 100%; border-radius: 4px;"></div>` : ''}
+                
+                <div class="review-answers">
+                    <div class="review-answer-block">
+                        <div class="review-answer-label">Your Answer:</div>
+                        <div class="review-answer-value ${!answered ? 'unanswered-text' : ''}">${uaFormatted}</div>
+                    </div>
+                    <div class="review-answer-block">
+                        <div class="review-answer-label">Correct Answer:</div>
+                        <div class="review-answer-value">${caFormatted}</div>
+                    </div>
+                    <div class="review-answer-block">
+                        <div class="review-answer-label">Result:</div>
+                        <div class="review-status ${statusClass}">${qStatus}</div>
                     </div>
                 </div>
-            `;
-        } else {
-            // Standard format
-            reviewHtml += `
-                <div class="review-item">
-                    <div class="review-question-num">Question ${idx + 1}</div>
-                    <div class="review-question-text">${q.q}</div>
-                    <div class="review-answers">
-                        <div class="review-answer-block">
-                            <div class="review-answer-label">Your Answer:</div>
-                            <div class="review-answer-value">${uaDisplay}</div>
-                        </div>
-                        <div class="review-answer-block">
-                            <div class="review-answer-label">Correct Answer:</div>
-                            <div class="review-answer-value">${caDisplay}</div>
-                        </div>
-                        <div class="review-answer-block">
-                            <div class="review-answer-label">Status:</div>
-                            <div class="review-status ${statusClass}">${qStatus}</div>
-                        </div>
-                    </div>
-                </div>
-            `;
-        }
+            </div>
+        `;
     });
 
-    score = Math.round(score * 100) / 100; // Round to 2 decimals
+    score = Math.round(score * 100) / 100;
     const total = questions.length;
     const percentage = Math.round((score / total) * 100);
     const correctCount = Math.floor(score);
     const incorrectCount = total - correctCount;
     const evaluation = percentage >= 70 ? 'Passed' : 'Failed';
 
-    // Calculate questions attempted
     let attempted = 0;
     questions.forEach((q, idx) => {
-        const ua = userAnswers[idx];
-        if (q.type !== 'TF' && ua !== undefined && ua !== null && ua !== '' && (typeof ua !== 'object' || Object.keys(ua).length > 0) && (!Array.isArray(ua) || ua.length > 0)) {
-            attempted++;
-        } else if (q.type === 'TF' && ua && Object.keys(ua).length > 0) {
+        if (isAnswerGiven(q, userAnswers[idx])) {
             attempted++;
         }
     });
 
-    // Time calculations
     const takenMs = TIME_ALLOWED_MS - remainingMs;
     const timeAllowedStr = '50:00';
     const timeTakenStr = formatTime(takenMs);
     const timeRemainingStr = formatTime(remainingMs);
 
-    // Show Results
     document.getElementById('res-score').innerText = `${score} / ${total}`;
     document.getElementById('res-percentage').innerText = `${percentage}%`;
     document.getElementById('res-correct').innerText = correctCount;
@@ -767,7 +914,6 @@ async function evaluateQuiz(submissionType = 'Manual', remainingMs = 0) {
 
     showPage('results');
     
-    // Save to Backend
     await saveAttempt(userName, attempted, total, correctCount, incorrectCount, score, percentage, evaluation, timeAllowedStr, timeTakenStr, timeRemainingStr, submissionType);
 }
 
@@ -812,5 +958,5 @@ async function saveAttempt(user, attempted, total, correct, incorrect, score, pe
     }
 }
 
-// Start
+// Start Application
 init();
