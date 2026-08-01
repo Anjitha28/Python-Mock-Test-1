@@ -19,6 +19,13 @@ const pool = new Pool({
     ssl: { rejectUnauthorized: false }
 });
 
+// Helper: Validate UUID format
+function isValidUuid(uuid) {
+    if (!uuid || typeof uuid !== 'string') return false;
+    const regex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+    return regex.test(uuid);
+}
+
 // Initialize Database Schema with Mock Test 1 table names
 async function initDB() {
     try {
@@ -124,7 +131,7 @@ app.post('/api/start-quiz', async (req, res) => {
         let { user_id, user_name, test_name } = req.body;
         if (!user_name || !test_name) return res.status(400).json({ error: "Missing fields" });
         
-        if (!user_id) {
+        if (!isValidUuid(user_id)) {
             const userRes = await pool.query(`
                 INSERT INTO mock_test_1_users (user_name, current_status) VALUES ($1, 'Started')
                 ON CONFLICT (user_name) DO UPDATE SET current_status = 'Started'
@@ -159,7 +166,7 @@ app.post('/api/start-quiz', async (req, res) => {
 app.post('/api/finish-quiz', async (req, res) => {
     try {
         const data = req.body;
-        let userId = data.user_id;
+        let userId = isValidUuid(data.user_id) ? data.user_id : null;
         let userName = data.user_name || 'Anonymous';
         let testName = data.test_name || 'Python Mastery - Mock Test 1';
         
@@ -175,7 +182,7 @@ app.post('/api/finish-quiz', async (req, res) => {
         }
         
         let attempt;
-        if (data.attempt_id) {
+        if (isValidUuid(data.attempt_id)) {
             const updateQuery = `
                 UPDATE mock_test_1_quiz_attempts SET
                     status = 'Completed',
@@ -236,7 +243,7 @@ app.post('/api/finish-quiz', async (req, res) => {
         res.status(200).json({ message: "Attempt completed successfully!", attempt: attempt });
     } catch (error) {
         console.error("Server error on finish-quiz:", error);
-        res.status(500).json({ error: "Internal server error." });
+        res.status(500).json({ error: error.message || "Internal server error." });
     }
 });
 
@@ -250,7 +257,7 @@ app.get('/api/user-history/:username', async (req, res) => {
         res.status(200).json(result.rows);
     } catch (error) {
         console.error("Fetch error:", error);
-        res.status(500).json({ error: "Internal server error." });
+        res.status(500).json({ error: error.message || "Internal server error." });
     }
 });
 
