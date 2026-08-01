@@ -159,40 +159,83 @@ app.post('/api/start-quiz', async (req, res) => {
 app.post('/api/finish-quiz', async (req, res) => {
     try {
         const data = req.body;
-        if (!data.attempt_id || !data.user_id) return res.status(400).json({ error: "Missing attempt_id or user_id" });
+        let userId = data.user_id;
+        let userName = data.user_name || 'Anonymous';
+        let testName = data.test_name || 'Python Mastery - Mock Test 1';
         
-        await pool.query(`UPDATE mock_test_1_users SET current_status = 'Completed Quiz' WHERE id = $1`, [data.user_id]);
+        if (!userId && userName) {
+            const userRes = await pool.query(`
+                INSERT INTO mock_test_1_users (user_name, current_status) VALUES ($1, 'Completed Quiz')
+                ON CONFLICT (user_name) DO UPDATE SET current_status = 'Completed Quiz'
+                RETURNING id
+            `, [userName]);
+            userId = userRes.rows[0].id;
+        } else if (userId) {
+            await pool.query(`UPDATE mock_test_1_users SET current_status = 'Completed Quiz' WHERE id = $1`, [userId]);
+        }
         
-        const updateQuery = `
-            UPDATE mock_test_1_quiz_attempts SET
-                status = 'Completed',
-                completed_at = NOW(),
-                updated_at = NOW(),
-                time_taken = $1,
-                time_remaining = $2,
-                submission_type = $3,
-                questions_attempted = $4,
-                total_questions = $5,
-                correct_answers = $6,
-                incorrect_answers = $7,
-                score = $8,
-                percentage = $9,
-                evaluation = $10
-            WHERE id = $11
-            RETURNING *;
-        `;
+        let attempt;
+        if (data.attempt_id) {
+            const updateQuery = `
+                UPDATE mock_test_1_quiz_attempts SET
+                    status = 'Completed',
+                    completed_at = NOW(),
+                    updated_at = NOW(),
+                    time_taken = $1,
+                    time_remaining = $2,
+                    submission_type = $3,
+                    questions_attempted = $4,
+                    total_questions = $5,
+                    correct_answers = $6,
+                    incorrect_answers = $7,
+                    score = $8,
+                    percentage = $9,
+                    evaluation = $10
+                WHERE id = $11
+                RETURNING *;
+            `;
+            
+            const values = [
+                data.time_taken, data.time_remaining, data.submission_type,
+                data.questions_attempted, data.total_questions, data.correct_answers,
+                data.incorrect_answers, data.score, data.percentage, data.evaluation,
+                data.attempt_id
+            ];
+            
+            const result = await pool.query(updateQuery, values);
+            if (result.rows.length > 0) {
+                attempt = result.rows[0];
+            }
+        }
         
-        const values = [
-            data.time_taken, data.time_remaining, data.submission_type,
-            data.questions_attempted, data.total_questions, data.correct_answers,
-            data.incorrect_answers, data.score, data.percentage, data.evaluation,
-            data.attempt_id
-        ];
+        if (!attempt) {
+            const countResult = await pool.query(
+                'SELECT COUNT(*) FROM mock_test_1_quiz_attempts WHERE user_name = $1 AND test_name = $2',
+                [userName, testName]
+            );
+            const attempt_number = parseInt(countResult.rows[0].count, 10) + 1;
+            
+            const insertQuery = `
+                INSERT INTO mock_test_1_quiz_attempts (
+                    user_id, user_name, test_name, attempt_number, status, started_at, completed_at, updated_at,
+                    time_allowed, time_taken, time_remaining, submission_type, questions_attempted, total_questions,
+                    correct_answers, incorrect_answers, score, percentage, evaluation
+                ) VALUES ($1, $2, $3, $4, 'Completed', NOW(), NOW(), NOW(), '50:00', $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+                RETURNING *;
+            `;
+            const values = [
+                userId, userName, testName, attempt_number,
+                data.time_taken, data.time_remaining, data.submission_type,
+                data.questions_attempted, data.total_questions, data.correct_answers,
+                data.incorrect_answers, data.score, data.percentage, data.evaluation
+            ];
+            const result = await pool.query(insertQuery, values);
+            attempt = result.rows[0];
+        }
         
-        const result = await pool.query(updateQuery, values);
-        res.status(200).json({ message: "Attempt completed successfully!", attempt: result.rows[0] });
+        res.status(200).json({ message: "Attempt completed successfully!", attempt: attempt });
     } catch (error) {
-        console.error("Server error:", error);
+        console.error("Server error on finish-quiz:", error);
         res.status(500).json({ error: "Internal server error." });
     }
 });

@@ -921,6 +921,8 @@ async function saveAttempt(user, attempted, total, correct, incorrect, score, pe
     const data = {
         attempt_id: attemptId,
         user_id: userId,
+        user_name: userName,
+        test_name: 'Python Mastery - Mock Test 1',
         questions_attempted: attempted,
         total_questions: total,
         correct_answers: correct,
